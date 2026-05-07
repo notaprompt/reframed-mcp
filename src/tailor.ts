@@ -31,11 +31,29 @@ interface TailorVersion {
   recruiterPerception?: string;
 }
 
+interface ProvenanceSummary {
+  verbatimPct: number;
+  paraphrasedPct: number;
+  addedPct: number;
+}
+
+interface ProvenanceReport {
+  summary: ProvenanceSummary;
+  segments: Array<{ text: string; type: "verbatim" | "paraphrased" | "added" }>;
+  headline?: string;
+}
+
 interface ApiResponse {
   result: {
     conservative: TailorVersion;
     hybrid: TailorVersion;
   };
+  // V2.1: real provenance from /api/v1/tailor — replaces the local
+  // change-count heuristic that used to fabricate the percentages.
+  provenance?: ProvenanceReport | null;
+  tailorId?: string | null;
+  verify_url?: string | null;
+  tier?: string;
 }
 
 const API_BASE = "https://reframed.works";
@@ -152,12 +170,21 @@ export async function callTailorApi(args: TailorToolArgs): Promise<TailorToolRes
     }
   }
 
-  const totalChanges = (conservative.changes?.length ?? 0) + (hybrid.changes?.length ?? 0);
-  const addedPct = Math.min(Math.round((totalChanges / 20) * 10), 15);
-  const yourPct = 100 - addedPct;
-
+  // Provenance — use real signed receipt from the API, not local heuristic.
+  // The /api/v1/tailor endpoint computes deterministic provenance and signs
+  // an Honesty Receipt. If for any reason the API didn't return one (older
+  // server, transient signing failure), fall back gracefully but mark it.
   sections.push("", "## Provenance");
-  sections.push(`${yourPct}% your words. ${addedPct}% added to bridge to the role.`);
+  if (data.provenance?.summary) {
+    const { verbatimPct, paraphrasedPct, addedPct } = data.provenance.summary;
+    sections.push(`${verbatimPct}% your words. ${paraphrasedPct}% reworded. ${addedPct}% added to bridge to the role.`);
+    if (data.tailorId && data.verify_url) {
+      sections.push("", `Honesty Receipt signed: ${data.verify_url}`);
+      sections.push(`Receipt ID: ${data.tailorId}`);
+    }
+  } else {
+    sections.push("Provenance not available for this response (server didn't sign a receipt).");
+  }
 
   return { text: sections.join("\n").trim() };
 }
