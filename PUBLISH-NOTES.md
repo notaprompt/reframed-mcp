@@ -18,6 +18,33 @@ POST https://reframed.works/api/v1/tailor-anon   → HTTP 200
 That call used exactly the body this client builds (`wrapRawResume` /
 `wrapRawJd`), so the wire contract is confirmed, not assumed.
 
+## Status: the blocker below was diagnosed and fixed
+
+**Resolved 2026-08-11.** The cause was confirmed by reading the server, not
+guessed. `wordOverlap()` in `src/lib/provenance.ts` is Sørensen-Dice
+normalized by the **sum** of both token counts:
+
+```
+score = (2 * shared) / (len(tailored) + len(original))
+```
+
+A ~20-word tailored bullet against one ~600-word blob tops out near
+`(2*20)/(20+600) ≈ 0.065`, against a paraphrase threshold of `0.55`. It was
+arithmetically impossible for any MCP receipt to read anything but 100%
+"added" — matching the live call exactly.
+
+`splitResumeLines()` now breaks the input into bullet-sized units, and
+`src/__tests__/resume-split.test.ts` pins the arithmetic: it asserts a
+near-verbatim bullet scores **below** threshold against the old blob and
+**above** it after splitting. 26 tests pass.
+
+**Still unconfirmed end to end:** the fixed path was not re-run against
+production — verification exhausted this IP's 3 free weekly tailors and the
+gate correctly returned 429. Before publishing, make one keyless call from a
+fresh IP and check `provenance.summary` shows non-zero `verbatimPct` or
+`paraphrasedPct`. If it does, publish. The original diagnostic procedure is
+kept below for reference.
+
 ## The thing to check first
 
 That verified call came back with provenance of **0% verbatim, 0% reworded,
