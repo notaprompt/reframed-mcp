@@ -56,7 +56,13 @@ interface ApiResponse {
   tier?: string;
 }
 
-const API_BASE = "https://reframed.works";
+const DEFAULT_API_BASE = "https://reframed.works";
+
+/** Points at production unless REFRAMED_API_BASE overrides it (preview deploys, local dev). */
+function apiBase(): string {
+  const override = process.env.REFRAMED_API_BASE?.trim();
+  return override && override.length > 0 ? override.replace(/\/+$/, "") : DEFAULT_API_BASE;
+}
 
 function wrapRawResume(text: string): ResumeData {
   return {
@@ -106,22 +112,38 @@ export interface TailorToolArgs {
   resumeInput: string;
   jdInput: string;
   style: "conservative" | "reframed" | "both";
-  apiKey: string;
+  /** Omit or pass null to use the free tier. */
+  apiKey?: string | null;
 }
 
 export interface TailorToolResult {
   text: string;
 }
 
-export async function callTailorApi(args: TailorToolArgs): Promise<TailorToolResult> {
-  const { resumeInput, jdInput, style, apiKey } = args;
+/** Best-effort read of the `error` field from a JSON error body. */
+async function readErrorMessage(response: Response): Promise<string | null> {
+  try {
+    const body = (await response.json()) as { error?: unknown };
+    return typeof body?.error === "string" && body.error.trim().length > 0
+      ? body.error.trim()
+      : null;
+  } catch {
+    return null;
+  }
+}
 
-  const response = await fetch(`${API_BASE}/api/v1/tailor`, {
+export async function callTailorApi(args: TailorToolArgs): Promise<TailorToolResult> {
+  const { resumeInput, jdInput, style } = args;
+  const apiKey = args.apiKey ?? null;
+
+  // No key → free tier. Key → the account's quota on the keyed route.
+  const endpoint = apiKey ? "/api/v1/tailor" : "/api/v1/tailor-anon";
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
+  const response = await fetch(`${apiBase()}${endpoint}`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
+    headers,
     body: JSON.stringify({
       resume: wrapRawResume(resumeInput),
       jd: wrapRawJd(jdInput),
@@ -130,16 +152,29 @@ export async function callTailorApi(args: TailorToolArgs): Promise<TailorToolRes
 
   if (response.status === 401) {
     throw new Error(
-      "API key invalid or expired. Rotate at https://reframed.works/settings → API Keys."
+      "API key invalid or expired. Rotate at https://reframed.works/settings → API Keys, or unset REFRAMED_API_KEY to use the free tier."
     );
   }
   if (response.status === 429) {
+    const serverMessage = await readErrorMessage(response);
+    if (!apiKey) {
+      throw new Error(
+        serverMessage ??
+          "Free tailors for this week are used up — more at https://reframed.works/pricing"
+      );
+    }
     const retryAfter = response.headers.get("Retry-After");
     const hint = retryAfter ? ` Try again in ${retryAfter} seconds.` : "";
-    throw new Error(`Rate limit hit (100/hour).${hint}`);
+    throw new Error(serverMessage ?? `Rate limit hit (100/hour).${hint}`);
   }
   if (response.status === 409) {
     throw new Error("Duplicate request detected. Wait a moment and try again.");
+  }
+  if (response.status === 503 || response.status === 451) {
+    const serverMessage = await readErrorMessage(response);
+    throw new Error(
+      serverMessage ?? "Free tailoring is paused right now. See https://reframed.works/pricing"
+    );
   }
   if (!response.ok) {
     throw new Error(

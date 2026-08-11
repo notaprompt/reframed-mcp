@@ -1,7 +1,7 @@
 {
   "name": "reframed-mcp",
-  "version": "1.0.0",
-  "description": "MCP server for Reframed — tailor a resume to a job from any agent harness",
+  "version": "1.1.0",
+  "description": "MCP server that tailors a resume to a job posting — voice-preserving, ATS-aware, with a provenance summary. Runs with no API key on the free tier.",
   "type": "module",
   "bin": {
     "reframed-mcp": "./dist/index.js"
@@ -25,7 +25,22 @@
     "ts-jest": "^29.0.0",
     "typescript": "^5.4.0"
   },
-  "keywords": ["mcp", "resume", "career", "claude", "cursor"],
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "resume",
+    "resume-tailoring",
+    "cv",
+    "ats",
+    "job-search",
+    "job-application",
+    "career",
+    "claude",
+    "claude-code",
+    "cursor",
+    "continue"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",

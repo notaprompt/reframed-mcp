@@ -9,22 +9,16 @@ import { callTailorApi } from "./tailor.js";
 
 const server = new McpServer({
   name: "reframed",
-  version: "1.0.0",
+  version: "1.1.0",
 });
 
-// Resolve key at startup. If missing, every tool call returns the setup error
-// rather than crashing — harnesses can still discover the tool.
-let apiKey: string | null = null;
-let keyError: string | null = null;
-try {
-  apiKey = resolveApiKey();
-} catch (e) {
-  keyError = e instanceof Error ? e.message : String(e);
-}
+// A key is optional. Without one, calls go to the free tier. With one, they go
+// to the account's quota. Resolved once at startup — no file reads per call.
+const apiKey: string | null = resolveApiKey();
 
 server.tool(
   "reframed_tailor",
-  "Tailor a resume to a specific job. Preserves your voice. Returns two versions and a provenance summary.",
+  "Tailor a resume to a specific job. Preserves the writer's voice. Returns two versions and a provenance summary. No account or API key needed to start.",
   {
     resume: z
       .string()
@@ -41,18 +35,6 @@ server.tool(
       ),
   },
   async ({ resume, jd, style }) => {
-    if (!apiKey) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: keyError ?? "No API key found. Set REFRAMED_API_KEY or write it to ~/.config/reframed/key.",
-          },
-        ],
-        isError: true,
-      };
-    }
-
     let resumeText: string;
     try {
       resumeText = resolveResume(resume);

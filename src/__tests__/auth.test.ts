@@ -7,11 +7,14 @@ describe("resolveApiKey", () => {
   const keyFilePath = path.join(os.homedir(), ".config", "reframed", "key");
   const keyFileDir = path.dirname(keyFilePath);
   let originalEnv: string | undefined;
-  let wroteKeyFile = false;
+  // These tests read and delete the real key file location, so any key the
+  // developer actually has is stashed and put back afterwards.
+  let stashedKeyFile: string | null = null;
 
   beforeEach(() => {
     originalEnv = process.env.REFRAMED_API_KEY;
     delete process.env.REFRAMED_API_KEY;
+    stashedKeyFile = fs.existsSync(keyFilePath) ? fs.readFileSync(keyFilePath, "utf8") : null;
   });
 
   afterEach(() => {
@@ -20,9 +23,11 @@ describe("resolveApiKey", () => {
     } else {
       delete process.env.REFRAMED_API_KEY;
     }
-    if (wroteKeyFile && fs.existsSync(keyFilePath)) {
+    if (stashedKeyFile !== null) {
+      if (!fs.existsSync(keyFileDir)) fs.mkdirSync(keyFileDir, { recursive: true });
+      fs.writeFileSync(keyFilePath, stashedKeyFile);
+    } else if (fs.existsSync(keyFilePath)) {
       fs.unlinkSync(keyFilePath);
-      wroteKeyFile = false;
     }
   });
 
@@ -41,15 +46,20 @@ describe("resolveApiKey", () => {
   it("reads from ~/.config/reframed/key when env var is absent", async () => {
     if (!fs.existsSync(keyFileDir)) fs.mkdirSync(keyFileDir, { recursive: true });
     fs.writeFileSync(keyFilePath, "rt_live_from_file\n");
-    wroteKeyFile = true;
     const { resolveApiKey } = await import("../auth.js");
     expect(resolveApiKey()).toBe("rt_live_from_file");
   });
 
-  it("throws a descriptive error when neither env var nor key file exists", async () => {
+  it("returns null when neither env var nor key file exists — free tier, not an error", async () => {
     if (fs.existsSync(keyFilePath)) fs.unlinkSync(keyFilePath);
     const { resolveApiKey } = await import("../auth.js");
-    expect(() => resolveApiKey()).toThrow(/No Reframed API key found/);
-    expect(() => resolveApiKey()).toThrow(/reframed\.works\/settings/);
+    expect(resolveApiKey()).toBeNull();
+  });
+
+  it("returns null when the env var is set but blank and no key file exists", async () => {
+    process.env.REFRAMED_API_KEY = "   ";
+    if (fs.existsSync(keyFilePath)) fs.unlinkSync(keyFilePath);
+    const { resolveApiKey } = await import("../auth.js");
+    expect(resolveApiKey()).toBeNull();
   });
 });
