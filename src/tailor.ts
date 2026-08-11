@@ -64,10 +64,58 @@ function apiBase(): string {
   return override && override.length > 0 ? override.replace(/\/+$/, "") : DEFAULT_API_BASE;
 }
 
+/**
+ * Split raw resume text into bullet-sized lines.
+ *
+ * This matters more than it looks. The server classifies each tailored bullet
+ * by Sørensen-Dice overlap against the original bullets:
+ *
+ *     score = (2 * shared words) / (len(tailored) + len(original))
+ *
+ * The denominator is the SUM of both lengths, so comparing a ~20-word tailored
+ * bullet against one ~600-word blob tops out near (2*20)/(20+600) ≈ 0.065 —
+ * against a paraphrase threshold of 0.55. Passing the whole resume as a single
+ * bullet therefore makes a verbatim or paraphrased verdict arithmetically
+ * unreachable, and every line comes back "added". A receipt claiming the
+ * applicant wrote none of their own resume is worse than no receipt at all.
+ */
+export function splitResumeLines(text: string): string[] {
+  /** Anything past this is still blob-shaped and gets split again by sentence. */
+  const LONG_LINE = 300;
+  const MIN_UNIT = 25;
+
+  const stripMarker = (s: string) => s.replace(/^\s*(?:[-*•·‣▪]|\d+[.)])\s*/, "").trim();
+
+  const units: string[] = [];
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = stripMarker(rawLine);
+    if (line.length === 0) continue;
+
+    // A pasted resume may arrive as one unbroken paragraph, or with a few very
+    // long run-on lines. Newline splitting alone leaves those blob-shaped, so
+    // long lines get broken down by sentence as well.
+    if (line.length > LONG_LINE) {
+      for (const sentence of line.split(/(?<=[.!?])\s+/)) {
+        const s = sentence.trim();
+        if (s.length > 0) units.push(s);
+      }
+    } else {
+      units.push(line);
+    }
+  }
+
+  const kept = units.filter((u) => u.length >= MIN_UNIT);
+  if (kept.length > 0) return kept;
+
+  // Everything was shorter than a unit — keep whatever there is rather than
+  // handing back nothing.
+  return units.length > 0 ? units : [text.trim()].filter(Boolean);
+}
+
 function wrapRawResume(text: string): ResumeData {
   return {
     contact: { name: "", email: "" },
-    experience: [{ title: "", company: "", startDate: "", bullets: [text] }],
+    experience: [{ title: "", company: "", startDate: "", bullets: splitResumeLines(text) }],
     education: [],
     skills: [],
   };
